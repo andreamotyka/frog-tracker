@@ -319,7 +319,7 @@
 </div>
 
 <!-- ── Loading screen ──────────────────────────────────────────────── -->
-<div id="loading-screen">
+<div id="loading-screen" style="display:none;">
   <div class="spinner"></div>
   <p>Loading...</p>
 </div>
@@ -481,13 +481,30 @@ let selectedSetId = null;
 
 // ── Supabase init ──────────────────────────────────────────────────────────
 async function init() {
-  const creds = JSON.parse(localStorage.getItem(CREDS_KEY) || 'null');
-  if (!creds) {
+  // Always start by showing loading screen, hide others
+  document.getElementById('loading-screen').style.display = 'flex';
+  document.getElementById('setup-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'none';
+
+  let creds = null;
+  try { creds = JSON.parse(localStorage.getItem(CREDS_KEY) || 'null'); } catch(e) {}
+
+  if (!creds || !creds.url || !creds.key) {
     document.getElementById('loading-screen').style.display = 'none';
     document.getElementById('setup-screen').style.display = 'flex';
     return;
   }
-  await connectWithCreds(creds.url, creds.key);
+  try {
+    await connectWithCreds(creds.url, creds.key);
+  } catch(e) {
+    // Saved creds failed — clear them and show setup screen with error
+    localStorage.removeItem(CREDS_KEY);
+    document.getElementById('loading-screen').style.display = 'none';
+    document.getElementById('setup-screen').style.display = 'flex';
+    const errEl = document.getElementById('setup-err');
+    errEl.textContent = 'Could not connect with saved credentials. Please re-enter them. (' + e.message + ')';
+    errEl.style.display = 'block';
+  }
 }
 
 async function connectSupabase() {
@@ -496,25 +513,38 @@ async function connectSupabase() {
   const errEl = document.getElementById('setup-err');
   errEl.style.display = 'none';
   if (!url || !key) { errEl.textContent = 'Please enter both URL and key.'; errEl.style.display = 'block'; return; }
-  document.querySelector('.btn-connect').textContent = 'Connecting...';
+  const btn = document.querySelector('.btn-connect');
+  btn.textContent = 'Connecting...';
+  btn.disabled = true;
   try {
     await connectWithCreds(url, key);
     localStorage.setItem(CREDS_KEY, JSON.stringify({ url, key }));
   } catch(e) {
     errEl.textContent = 'Connection failed: ' + e.message;
     errEl.style.display = 'block';
-    document.querySelector('.btn-connect').textContent = 'Connect & Load Data';
+    btn.textContent = 'Connect & Load Data';
+    btn.disabled = false;
   }
 }
 
 async function connectWithCreds(url, key) {
-  sb = supabase.createClient(url, key);
-  // Test connection
-  const { error } = await sb.from('refs').select('id').limit(1);
-  if (error && error.code !== 'PGRST116') throw new Error(error.message);
+  sb = supabase.createClient(url, key, {
+    auth: { persistSession: false }
+  });
+
+  // Test connection with a simple query — don't use .single() here as table may be empty
+  const { data: testData, error: testError } = await sb.from('refs').select('id').limit(1);
+  if (testError) {
+    // PGRST116 = no rows, which is fine. Anything else is a real error.
+    if (testError.code !== 'PGRST116') throw new Error(testError.message);
+  }
+
   document.getElementById('setup-screen').style.display = 'none';
   document.getElementById('loading-screen').style.display = 'flex';
+  document.getElementById('loading-screen').querySelector('p').textContent = 'Loading your collection...';
+
   await loadAll();
+
   document.getElementById('loading-screen').style.display = 'none';
   document.getElementById('app').style.display = 'block';
   setSyncStatus('ok');
@@ -522,17 +552,21 @@ async function connectWithCreds(url, key) {
 
 // ── Data loading ───────────────────────────────────────────────────────────
 async function loadAll() {
-  const [r1, r2, r3, r4] = await Promise.all([
-    sb.from('refs').select('*').single(),
-    sb.from('frogs').select('*').order('breed'),
-    sb.from('sets').select('*').order('name'),
-    sb.from('memberships').select('*')
-  ]);
+  // Load each table separately so one failure doesn't block others
+  const r1 = await sb.from('refs').select('*').limit(1).maybeSingle();
+  const r2 = await sb.from('frogs').select('*').order('breed');
+  const r3 = await sb.from('sets').select('*').order('name');
+  const r4 = await sb.from('memberships').select('*');
+
+  if (r2.error) throw new Error('Failed to load frogs: ' + r2.error.message);
+  if (r3.error) throw new Error('Failed to load sets: ' + r3.error.message);
+  if (r4.error) throw new Error('Failed to load memberships: ' + r4.error.message);
 
   // If refs row doesn't exist yet, seed it
-  if (r1.error || !r1.data) {
-    const seedRefs = { breeds: SEED.breeds, primary_colors: SEED.primaryColors, secondary_colors: SEED.secondaryColors };
-    await sb.from('refs').insert([seedRefs]);
+  if (!r1.data) {
+    const seedRefs = { id: 1, breeds: SEED.breeds, primary_colors: SEED.primaryColors, secondary_colors: SEED.secondaryColors };
+    const { error: refErr } = await sb.from('refs').upsert([seedRefs]);
+    if (refErr) throw new Error('Failed to save reference lists: ' + refErr.message);
     refs = { breeds: SEED.breeds, primaryColors: SEED.primaryColors, secondaryColors: SEED.secondaryColors };
   } else {
     refs = { breeds: r1.data.breeds || [], primaryColors: r1.data.primary_colors || [], secondaryColors: r1.data.secondary_colors || [] };
