@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Frog Collection Tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --bg: #0e1a12;
+    --bg2: #152019;
+    --bg3: #1c2d21;
+    --panel: #1e2f23;
+    --border: #2d4433;
+    --accent: #6fcf7a;
+    --accent2: #a8e6b0;
+    --gold: #c9a84c;
+    --gold2: #e8cc88;
+    --text: #d4ead8;
+    --text2: #8aab90;
+    --text3: #4d6b54;
+    --danger: #e07070;
+    --highlight: #2a4530;
+    --teal: #4db8a8;
+    --amber: #d4a94a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 13px;
+    min-height: 100vh;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 40px 40px;
+    opacity: 0.15;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── Loading / Setup screens ───────────────────────────── */
+  #setup-screen, #loading-screen {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: var(--bg); z-index: 1000;
+  }
+  #loading-screen p { color: var(--text3); font-size: 13px; margin-top: 12px; }
+  .spinner {
+    width: 36px; height: 36px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #setup-screen .setup-box {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 40px 48px;
+    max-width: 560px; width: 90%;
+  }
+  #setup-screen h2 {
+    font-family: 'Playfair Display', serif;
+    font-size: 24px; color: var(--accent2);
+    margin-bottom: 8px;
+  }
+  #setup-screen p { color: var(--text3); font-size: 12px; line-height: 1.7; margin-bottom: 20px; }
+  #setup-screen .field { margin-bottom: 16px; }
+  #setup-screen label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text3); margin-bottom: 6px; }
+  #setup-screen input {
+    width: 100%; background: var(--bg2); border: 1px solid var(--border);
+    color: var(--text); font-family: 'DM Mono', monospace; font-size: 12px;
+    padding: 9px 12px; border-radius: 4px; outline: none;
+  }
+  #setup-screen input:focus { border-color: var(--accent); }
+  #setup-screen .btn-connect {
+    width: 100%; background: var(--accent); color: var(--bg);
+    border: none; cursor: pointer; font-family: 'DM Mono', monospace;
+    font-size: 13px; font-weight: 500; padding: 11px;
+    border-radius: 4px; margin-top: 8px; transition: background 0.2s;
+  }
+  #setup-screen .btn-connect:hover { background: var(--accent2); }
+  #setup-screen .err { color: var(--danger); font-size: 11px; margin-top: 10px; display: none; }
+  #setup-screen .help {
+    margin-top: 20px; padding-top: 20px;
+    border-top: 1px solid var(--border);
+    font-size: 11px; color: var(--text3); line-height: 1.8;
+  }
+  #setup-screen .help a { color: var(--accent); text-decoration: none; }
+  #setup-screen .help code {
+    background: var(--bg2); padding: 1px 6px; border-radius: 3px;
+    color: var(--text2);
+  }
+  #setup-screen .step { margin-bottom: 6px; }
+  #setup-screen .step-num {
+    display: inline-block; width: 18px; height: 18px;
+    background: var(--highlight); border: 1px solid var(--border);
+    border-radius: 50%; text-align: center; line-height: 18px;
+    font-size: 10px; color: var(--accent); margin-right: 6px;
+  }
+
+  /* ── App chrome ────────────────────────────────────────── */
+  #app { display: none; position: relative; z-index: 5; }
+
+  header {
+    padding: 24px 40px 18px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 20px;
+    background: linear-gradient(180deg, #0a1409 0%, transparent 100%);
+  }
+  header h1 { font-family: 'Playfair Display', serif; font-size: 26px; color: var(--accent2); }
+  .header-stats { margin-left: auto; display: flex; gap: 16px; align-items: center; }
+  .stat-pill {
+    background: var(--bg3); border: 1px solid var(--border);
+    padding: 4px 12px; border-radius: 20px; font-size: 11px; color: var(--text2);
+  }
+  .stat-pill span { color: var(--accent); }
+  .sync-indicator {
+    font-size: 10px; padding: 3px 10px; border-radius: 12px;
+    border: 1px solid var(--border); color: var(--text3);
+    transition: all 0.3s;
+  }
+  .sync-indicator.syncing { color: var(--gold); border-color: var(--gold); }
+  .sync-indicator.ok { color: var(--accent); border-color: var(--accent); }
+  .sync-indicator.err { color: var(--danger); border-color: var(--danger); }
+
+  nav {
+    display: flex; border-bottom: 1px solid var(--border);
+    padding: 0 40px; background: var(--bg2);
+  }
+  nav button {
+    background: none; border: none; cursor: pointer;
+    padding: 13px 20px;
+    font-family: 'DM Mono', monospace; font-size: 11px;
+    color: var(--text3); letter-spacing: 1px; text-transform: uppercase;
+    border-bottom: 2px solid transparent; transition: all 0.2s;
+  }
+  nav button:hover { color: var(--text2); }
+  nav button.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  main { padding: 28px 40px; max-width: 1400px; }
+  .view { display: none; }
+  .view.active { display: block; }
+
+  /* ── Shared components ─────────────────────────────────── */
+  .section-header { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+  .section-header h2 { font-family: 'Playfair Display', serif; font-size: 19px; color: var(--accent2); }
+  .count-badge { background: var(--highlight); border: 1px solid var(--border); padding: 2px 10px; border-radius: 12px; font-size: 11px; color: var(--accent); }
+
+  .form-row {
+    display: flex; gap: 10px; align-items: flex-end;
+    margin-bottom: 20px; background: var(--panel);
+    border: 1px solid var(--border); padding: 14px 18px; border-radius: 6px;
+    flex-wrap: wrap;
+  }
+  .form-group { display: flex; flex-direction: column; gap: 5px; }
+  .form-group label { font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text3); }
+  select, input[type="text"] {
+    background: var(--bg2); border: 1px solid var(--border);
+    color: var(--text); font-family: 'DM Mono', monospace; font-size: 13px;
+    padding: 7px 10px; border-radius: 4px; outline: none; transition: border-color 0.2s;
+    min-width: 140px;
+  }
+  select:focus, input:focus { border-color: var(--accent); }
+
+  .btn-add {
+    background: var(--accent); color: var(--bg); border: none; cursor: pointer;
+    font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 500;
+    padding: 8px 18px; border-radius: 4px; transition: background 0.2s;
+    white-space: nowrap; align-self: flex-end;
+  }
+  .btn-add:hover { background: var(--accent2); }
+  .btn-add:disabled { background: var(--bg3); color: var(--text3); cursor: not-allowed; }
+
+  .btn-danger {
+    background: none; border: 1px solid var(--danger); color: var(--danger);
+    cursor: pointer; font-family: 'DM Mono', monospace; font-size: 11px;
+    padding: 3px 8px; border-radius: 3px; transition: all 0.15s;
+  }
+  .btn-danger:hover { background: var(--danger); color: var(--bg); }
+
+  .btn-secondary {
+    background: var(--bg3); border: 1px solid var(--border); color: var(--text2);
+    cursor: pointer; font-family: 'DM Mono', monospace; font-size: 12px;
+    padding: 8px 16px; border-radius: 4px; transition: all 0.2s;
+  }
+  .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+  .filter-row { display: flex; gap: 10px; margin-bottom: 14px; align-items: center; }
+  .filter-row input { flex: 1; max-width: 280px; }
+
+  .table-wrap { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; }
+  thead tr { background: var(--bg3); }
+  thead th {
+    padding: 9px 14px; text-align: left;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px;
+    color: var(--text3); font-weight: 500; border-bottom: 1px solid var(--border);
+    cursor: pointer; user-select: none;
+  }
+  thead th:hover { color: var(--text2); }
+  tbody tr { border-bottom: 1px solid var(--border); transition: background 0.15s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--highlight); }
+  tbody td { padding: 8px 14px; color: var(--text2); }
+  td.primary-col { color: var(--text); font-weight: 500; }
+
+  .badge {
+    display: inline-block; background: var(--highlight); border: 1px solid var(--border);
+    padding: 1px 8px; border-radius: 10px; font-size: 11px; color: var(--accent);
+    min-width: 28px; text-align: center;
+  }
+  .badge.gold { background: #2a2210; border-color: #5a4a20; color: var(--gold2); }
+  .badge.zero { color: var(--text3); border-color: var(--bg3); background: none; }
+  .badge.teal { background: #0f2a25; border-color: #1a4a40; color: var(--teal); }
+  .badge.amber { background: #2a2010; border-color: #4a3a10; color: var(--amber); }
+
+  /* ── Sets view ─────────────────────────────────────────── */
+  .sets-grid { display: grid; grid-template-columns: 300px 1fr; gap: 20px; }
+  .set-list { display: flex; flex-direction: column; gap: 5px; max-height: 70vh; overflow-y: auto; }
+  .set-card {
+    background: var(--panel); border: 1px solid var(--border);
+    padding: 11px 14px; border-radius: 5px; cursor: pointer; transition: all 0.15s;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .set-card:hover, .set-card.selected { border-color: var(--accent); background: var(--highlight); }
+  .set-card .set-name { font-family: 'Playfair Display', serif; font-size: 14px; color: var(--accent2); }
+  .set-card .set-meta { font-size: 11px; color: var(--text3); margin-top: 2px; }
+  .set-detail { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 22px; min-height: 300px; }
+  .set-detail h3 { font-family: 'Playfair Display', serif; font-size: 20px; color: var(--accent2); margin-bottom: 4px; }
+  .set-date { color: var(--text3); font-size: 11px; margin-bottom: 18px; }
+
+  .member-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--bg2); border: 1px solid var(--border);
+    padding: 4px 10px; border-radius: 14px; font-size: 11px; color: var(--text2); margin: 3px;
+  }
+  .member-chip button { background: none; border: none; cursor: pointer; color: var(--text3); font-size: 13px; line-height: 1; padding: 0; transition: color 0.15s; }
+  .member-chip button:hover { color: var(--danger); }
+
+  .add-member-row {
+    display: flex; gap: 8px; align-items: flex-end;
+    padding: 12px; background: var(--bg2);
+    border: 1px solid var(--border); border-radius: 5px; margin-bottom: 14px; flex-wrap: wrap;
+  }
+
+  .empty-state { color: var(--text3); font-size: 12px; padding: 36px; text-align: center; border: 1px dashed var(--border); border-radius: 6px; }
+
+  /* ── Analytics ─────────────────────────────────────────── */
+  .analytics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+  .analytics-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 18px; }
+  .analytics-panel h3 { font-family: 'Playfair Display', serif; font-size: 15px; color: var(--gold2); margin-bottom: 12px; padding-bottom: 9px; border-bottom: 1px solid var(--border); }
+  .stat-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--bg3); font-size: 12px; }
+  .stat-row:last-child { border-bottom: none; }
+  .stat-label { color: var(--text2); }
+  .stat-value { color: var(--accent); font-weight: 500; }
+
+  .lookup-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 18px; margin-bottom: 20px; }
+  .lookup-panel h3 { font-family: 'Playfair Display', serif; font-size: 15px; color: var(--gold2); margin-bottom: 12px; }
+  .lookup-controls { display: flex; gap: 10px; align-items: flex-end; margin-bottom: 14px; flex-wrap: wrap; }
+  .lookup-results { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 7px; }
+  .lookup-chip { background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; padding: 7px 12px; display: flex; justify-content: space-between; align-items: center; }
+  .lookup-chip.has-count { border-color: var(--accent); background: var(--highlight); }
+  .lookup-chip .chip-label { font-size: 12px; color: var(--text2); }
+  .lookup-chip .chip-count { color: var(--accent); font-weight: 500; }
+  .lookup-chip.has-count .chip-label { color: var(--text); }
+
+  /* ── Data view ─────────────────────────────────────────── */
+  .tools-row { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+
+  /* ── Toast ─────────────────────────────────────────────── */
+  #toast {
+    position: fixed; bottom: 28px; right: 28px;
+    background: var(--accent); color: var(--bg);
+    padding: 9px 18px; border-radius: 5px; font-size: 12px; font-weight: 500;
+    opacity: 0; transition: opacity 0.3s; z-index: 2000; pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+  #toast.error { background: var(--danger); color: #fff; }
+
+  @media (max-width: 900px) {
+    header, nav, main { padding-left: 16px; padding-right: 16px; }
+    .sets-grid, .analytics-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ── Setup screen ─────────────────────────────────────────────────── -->
+<div id="setup-screen" style="display:none;">
+  <div class="setup-box">
+    <h2>🐸 Connect to Database</h2>
+    <p>Enter your Supabase project credentials below. You only need to do this once — they'll be saved in your browser.</p>
+    <div class="field">
+      <label>Supabase Project URL</label>
+      <input type="text" id="sb-url" placeholder="https://xxxxxxxxxxxx.supabase.co">
+    </div>
+    <div class="field">
+      <label>Supabase Anon Key</label>
+      <input type="text" id="sb-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...">
+    </div>
+    <button class="btn-connect" onclick="connectSupabase()">Connect &amp; Load Data</button>
+    <div class="err" id="setup-err"></div>
+
+    <div class="help">
+      <strong style="color:var(--text2);display:block;margin-bottom:8px;">How to get your credentials:</strong>
+      <div class="step"><span class="step-num">1</span>Go to <a href="https://supabase.com" target="_blank">supabase.com</a> and sign in</div>
+      <div class="step"><span class="step-num">2</span>Open your <code>frog-tracker</code> project</div>
+      <div class="step"><span class="step-num">3</span>Click <strong>Project Settings → API</strong></div>
+      <div class="step"><span class="step-num">4</span>Copy <strong>Project URL</strong> and <strong>anon public</strong> key into the fields above</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Loading screen ──────────────────────────────────────────────── -->
+<div id="loading-screen">
+  <div class="spinner"></div>
+  <p>Loading...</p>
+</div>
+
+<!-- ── Main app ────────────────────────────────────────────────────── -->
+<div id="app">
+  <header>
+    <div>
+      <h1>🐸 Frog Collection Tracker</h1>
+    </div>
+    <div class="header-stats">
+      <div class="stat-pill">Frogs: <span id="hdr-frogs">0</span></div>
+      <div class="stat-pill">Sets: <span id="hdr-sets">0</span></div>
+      <div class="stat-pill">Memberships: <span id="hdr-memberships">0</span></div>
+      <div class="sync-indicator" id="sync-indicator">● cloud</div>
+    </div>
+  </header>
+
+  <nav>
+    <button class="active" onclick="showView('frogs', this)">Frog Catalog</button>
+    <button onclick="showView('sets', this)">Sets</button>
+    <button onclick="showView('analytics', this)">Analytics</button>
+    <button onclick="showView('data', this)">Data &amp; Export</button>
+  </nav>
+
+  <main>
+
+    <!-- FROG CATALOG -->
+    <div id="view-frogs" class="view active">
+      <div class="section-header">
+        <h2>Frog Catalog</h2>
+        <span class="count-badge" id="frog-count">0 frogs</span>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Breed</label><select id="add-breed"></select></div>
+        <div class="form-group"><label>Primary Color</label><select id="add-primary"></select></div>
+        <div class="form-group"><label>Secondary Color</label><select id="add-secondary"></select></div>
+        <button class="btn-add" id="btn-add-frog" onclick="addFrog()">+ Add Frog</button>
+      </div>
+      <div class="filter-row">
+        <input type="text" id="frog-search" placeholder="Filter by breed or color..." oninput="renderFrogTable()">
+        <select id="frog-sort" onchange="renderFrogTable()">
+          <option value="breed">Sort: Breed</option>
+          <option value="sets-desc">Sort: Most Sets</option>
+          <option value="bp-desc">Sort: Most (Breed+Primary)</option>
+          <option value="bs-desc">Sort: Most (Breed+Secondary)</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Breed</th><th>Primary</th><th>Secondary</th>
+              <th title="Total sets this frog appears in">Sets</th>
+              <th>Set Names</th>
+              <th title="Unique sets with same Breed + Primary color">Breed+Primary Sets</th>
+              <th title="Unique sets with same Breed + Secondary color">Breed+Secondary Sets</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="frog-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- SETS -->
+    <div id="view-sets" class="view">
+      <div class="section-header">
+        <h2>Sets</h2>
+        <span class="count-badge" id="set-count-badge">0 sets</span>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Set Name</label><input type="text" id="new-set-name" placeholder="e.g. Winter Magic"></div>
+        <div class="form-group"><label>Date / Identifier</label><input type="text" id="new-set-date" placeholder="e.g. 2024 01"></div>
+        <button class="btn-add" onclick="addSet()">+ Create Set</button>
+      </div>
+      <div class="sets-grid">
+        <div>
+          <div class="filter-row"><input type="text" id="set-search" placeholder="Filter sets..." oninput="renderSetList()"></div>
+          <div class="set-list" id="set-list"></div>
+        </div>
+        <div class="set-detail" id="set-detail">
+          <div class="empty-state">← Select a set to view and edit its members</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ANALYTICS -->
+    <div id="view-analytics" class="view">
+      <div class="section-header"><h2>Analytics</h2></div>
+      <div class="analytics-grid">
+        <div class="analytics-panel"><h3>Collection Summary</h3><div id="summary-stats"></div></div>
+        <div class="analytics-panel"><h3>Top Sets by Size</h3><div id="top-sets"></div></div>
+      </div>
+      <div class="lookup-panel">
+        <h3>Sets by Breed + Primary Color</h3>
+        <div class="lookup-controls">
+          <div class="form-group"><label>Select Breed</label><select id="lookup-bp-breed" onchange="renderLookupBP()"></select></div>
+        </div>
+        <div class="lookup-results" id="lookup-bp-results"></div>
+      </div>
+      <div class="lookup-panel">
+        <h3>Sets by Breed + Secondary Color</h3>
+        <div class="lookup-controls">
+          <div class="form-group"><label>Select Breed</label><select id="lookup-bs-breed" onchange="renderLookupBS()"></select></div>
+        </div>
+        <div class="lookup-results" id="lookup-bs-results"></div>
+      </div>
+    </div>
+
+    <!-- DATA & EXPORT -->
+    <div id="view-data" class="view">
+      <div class="section-header"><h2>Data &amp; Export</h2></div>
+      <div class="tools-row">
+        <button class="btn-secondary" onclick="exportCSV()">⬇ Export Frogs CSV</button>
+        <button class="btn-secondary" onclick="exportMembershipsCSV()">⬇ Export Memberships CSV</button>
+        <button class="btn-secondary" onclick="exportJSON()">⬇ Export Full JSON Backup</button>
+      </div>
+      <div class="analytics-panel" style="margin-bottom:20px;">
+        <h3 style="font-family:'Playfair Display',serif;font-size:15px;color:var(--gold2);margin-bottom:12px;">Reference Lists</h3>
+        <p style="color:var(--text3);font-size:12px;margin-bottom:14px;">Edit breeds and colors here. One entry per line. Changes are saved automatically.</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;">
+          <div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--text3);margin-bottom:8px;">Breeds (<span id="breed-count">0</span>)</div>
+            <textarea id="ref-breeds" style="width:100%;height:300px;background:var(--bg2);border:1px solid var(--border);color:var(--text2);font-family:'DM Mono',monospace;font-size:12px;padding:10px;border-radius:4px;resize:vertical;" oninput="saveRefs()"></textarea>
+          </div>
+          <div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--text3);margin-bottom:8px;">Primary Colors (<span id="pri-count">0</span>)</div>
+            <textarea id="ref-primary" style="width:100%;height:300px;background:var(--bg2);border:1px solid var(--border);color:var(--text2);font-family:'DM Mono',monospace;font-size:12px;padding:10px;border-radius:4px;resize:vertical;" oninput="saveRefs()"></textarea>
+          </div>
+          <div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--text3);margin-bottom:8px;">Secondary Colors (<span id="sec-count">0</span>)</div>
+            <textarea id="ref-secondary" style="width:100%;height:300px;background:var(--bg2);border:1px solid var(--border);color:var(--text2);font-family:'DM Mono',monospace;font-size:12px;padding:10px;border-radius:4px;resize:vertical;" oninput="saveRefs()"></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="analytics-panel">
+        <h3 style="font-family:'Playfair Display',serif;font-size:15px;color:var(--danger);margin-bottom:10px;">Danger Zone</h3>
+        <button class="btn-danger" onclick="clearAllData()">Clear All Frogs &amp; Sets</button>
+        <span style="color:var(--text3);font-size:11px;margin-left:12px;">Erases all collection data from the cloud. Reference lists are kept.</span>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── Config ─────────────────────────────────────────────────────────────────
+const CREDS_KEY = 'frog_tracker_creds_v1';
+const SEED = {"breeds":["Aceris","Adamantis","Africanus","Atlium","Americano","Amfractus","Anura","Arbor","Arcus","Axis","Biplex","Botulus","Bovis","Bulbus","Bulla","Calvaria","Calyx","Cerebrum","Cesti","Clunicula","Coclearis","Conexus","Cornus","Corona","Crustalli","Dextera","Dimidius","Emblema","Exclamo","Favus","Figularis","Flecto","Florens","Floresco","Foramen","Fortuno","Fractus","Frondis","Garcius","Geminus","Gemma","Glacio","Gyrus","Hennae","Hexas","Igneous","Imbris","Infinitas","Insero","Inverso","Janus","Lanterna","Latus","Lentium","Levar","Ligo","Losgann","Lotus","Lucus","Ludo","Lunaris","Magus","Marinus","Marmorea","Mazeus","Mixtus","Mustacium","Nasus","Nebula","Nimbilis","Nodare","Obaro","Ocularis","Orbis","Ornatus","Palma","Papilio","Partiri","Persona","Pictoris","Pingo","Pistrix","Planeta","Pluma","Pompeius","Porto","Procursus","Pulvillus","Puncti","Pyramis","Quilta","Roboris","Sagitta","Scutulata","Serpentis","Shelbus","Signum","Skeletos","Sol","Spargo","Spinae","Spira","Splendico","Stellata","Stillas","Symphonia","Tabula","Templum","Tessera","Topologia","Tribus","Triquetra","Trivium","Velatus","Veru","Vicis","Viduo","Vinaceus","Volta","Zebrae"],"primaryColors":["Aqua","Azure","Beige","Black","Blue","Cocos","Emerald","Glass","Golden","Green","Lime","Marine","Maroon","Olive","Orange","Pink","Purple","Red","Royal","Tangelo","Violet","White","Yellow"],"secondaryColors":["Albeo","Aurum","Bruna","Caelus","Cafea","Callaina","Carota","Ceres","Chroma","Floris","Folium","Muscus","Picea","Pruni","Tingo","Viola"]};
+
+// ── State ──────────────────────────────────────────────────────────────────
+let sb = null;
+let frogs = [], sets = [], memberships = [];
+let refs = { breeds: [], primaryColors: [], secondaryColors: [] };
+let selectedSetId = null;
+
+// ── Supabase init ──────────────────────────────────────────────────────────
+async function init() {
+  const creds = JSON.parse(localStorage.getItem(CREDS_KEY) || 'null');
+  if (!creds) {
+    document.getElementById('loading-screen').style.display = 'none';
+    document.getElementById('setup-screen').style.display = 'flex';
+    return;
+  }
+  await connectWithCreds(creds.url, creds.key);
+}
+
+async function connectSupabase() {
+  const url = document.getElementById('sb-url').value.trim();
+  const key = document.getElementById('sb-key').value.trim();
+  const errEl = document.getElementById('setup-err');
+  errEl.style.display = 'none';
+  if (!url || !key) { errEl.textContent = 'Please enter both URL and key.'; errEl.style.display = 'block'; return; }
+  document.querySelector('.btn-connect').textContent = 'Connecting...';
+  try {
+    await connectWithCreds(url, key);
+    localStorage.setItem(CREDS_KEY, JSON.stringify({ url, key }));
+  } catch(e) {
+    errEl.textContent = 'Connection failed: ' + e.message;
+    errEl.style.display = 'block';
+    document.querySelector('.btn-connect').textContent = 'Connect & Load Data';
+  }
+}
+
+async function connectWithCreds(url, key) {
+  sb = supabase.createClient(url, key);
+  // Test connection
+  const { error } = await sb.from('refs').select('id').limit(1);
+  if (error && error.code !== 'PGRST116') throw new Error(error.message);
+  document.getElementById('setup-screen').style.display = 'none';
+  document.getElementById('loading-screen').style.display = 'flex';
+  await loadAll();
+  document.getElementById('loading-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  setSyncStatus('ok');
+}
+
+// ── Data loading ───────────────────────────────────────────────────────────
+async function loadAll() {
+  const [r1, r2, r3, r4] = await Promise.all([
+    sb.from('refs').select('*').single(),
+    sb.from('frogs').select('*').order('breed'),
+    sb.from('sets').select('*').order('name'),
+    sb.from('memberships').select('*')
+  ]);
+
+  // If refs row doesn't exist yet, seed it
+  if (r1.error || !r1.data) {
+    const seedRefs = { breeds: SEED.breeds, primary_colors: SEED.primaryColors, secondary_colors: SEED.secondaryColors };
+    await sb.from('refs').insert([seedRefs]);
+    refs = { breeds: SEED.breeds, primaryColors: SEED.primaryColors, secondaryColors: SEED.secondaryColors };
+  } else {
+    refs = { breeds: r1.data.breeds || [], primaryColors: r1.data.primary_colors || [], secondaryColors: r1.data.secondary_colors || [] };
+  }
+
+  frogs = r2.data || [];
+  sets = r3.data || [];
+  memberships = r4.data || [];
+
+  // If no frogs yet, seed with spreadsheet data
+  if (frogs.length === 0 && SEED.frogs.length > 0) {
+    await seedInitialData();
+    const [f2, s2, m2] = await Promise.all([
+      sb.from('frogs').select('*').order('breed'),
+      sb.from('sets').select('*').order('name'),
+      sb.from('memberships').select('*')
+    ]);
+    frogs = f2.data || [];
+    sets = s2.data || [];
+    memberships = m2.data || [];
+  }
+
+  populateAllDropdowns();
+  renderFrogTable();
+  renderSetList();
+  updateHeader();
+}
+
+async function seedInitialData() {
+  // Insert frogs
+  const frogRows = SEED.frogs.map(f => ({ breed: f.breed, primary_color: f.primary, secondary_color: f.secondary }));
+  const { data: insertedFrogs } = await sb.from('frogs').insert(frogRows).select();
+
+  // Build frog key→id map
+  const frogMap = {};
+  (insertedFrogs || []).forEach(f => { frogMap[`${f.breed}|${f.primary_color}|${f.secondary_color}`] = f.id; });
+
+  // Insert sets and memberships
+  for (const s of SEED.sets) {
+    const { data: setRow } = await sb.from('sets').insert([{ name: s.name, date_label: s.date }]).select().single();
+    if (!setRow) continue;
+    const memberRows = s.members.map(m => ({
+      set_id: setRow.id,
+      breed: m.breed,
+      primary_color: m.primary,
+      secondary_color: m.secondary
+    }));
+    if (memberRows.length) await sb.from('memberships').insert(memberRows);
+  }
+}
+
+// ── Sync helpers ───────────────────────────────────────────────────────────
+function setSyncStatus(status) {
+  const el = document.getElementById('sync-indicator');
+  el.className = 'sync-indicator ' + status;
+  el.textContent = status === 'syncing' ? '↻ saving...' : status === 'ok' ? '● synced' : '✕ error';
+}
+
+async function dbOp(fn) {
+  setSyncStatus('syncing');
+  try {
+    await fn();
+    setSyncStatus('ok');
+  } catch(e) {
+    setSyncStatus('err');
+    toast('Save error: ' + e.message, true);
+    throw e;
+  }
+}
+
+// ── Computed helpers ───────────────────────────────────────────────────────
+function membershipsForFrog(breed, primary, secondary) {
+  return memberships.filter(m => m.breed === breed && m.primary_color === primary && m.secondary_color === secondary);
+}
+
+function setNamesForFrog(breed, primary, secondary) {
+  const mems = membershipsForFrog(breed, primary, secondary);
+  const setIds = [...new Set(mems.map(m => m.set_id))];
+  return setIds.map(id => sets.find(s => s.id === id)?.name).filter(Boolean);
+}
+
+function uniqueSetsCount(breed, primary, secondary) {
+  return new Set(membershipsForFrog(breed, primary, secondary).map(m => m.set_id)).size;
+}
+
+function uniqueSetsBreedPrimary(breed, primary) {
+  const matching = memberships.filter(m => m.breed === breed && m.primary_color === primary);
+  return new Set(matching.map(m => m.set_id)).size;
+}
+
+function uniqueSetsBreedSecondary(breed, secondary) {
+  const matching = memberships.filter(m => m.breed === breed && m.secondary_color === secondary);
+  return new Set(matching.map(m => m.set_id)).size;
+}
+
+// ── Frogs ──────────────────────────────────────────────────────────────────
+async function addFrog() {
+  const btn = document.getElementById('btn-add-frog');
+  const breed = document.getElementById('add-breed').value;
+  const primary = document.getElementById('add-primary').value;
+  const secondary = document.getElementById('add-secondary').value;
+  if (!breed || !primary || !secondary) return;
+  if (frogs.some(f => f.breed === breed && f.primary_color === primary && f.secondary_color === secondary)) {
+    toast('This frog already exists in your catalog.', true); return;
+  }
+  btn.disabled = true;
+  await dbOp(async () => {
+    const { data, error } = await sb.from('frogs').insert([{ breed, primary_color: primary, secondary_color: secondary }]).select().single();
+    if (error) throw error;
+    frogs.push(data);
+    frogs.sort((a, b) => a.breed.localeCompare(b.breed));
+    renderFrogTable();
+    updateHeader();
+    toast(`Added ${breed} · ${primary} · ${secondary}`);
+  });
+  btn.disabled = false;
+}
+
+async function removeFrog(id, breed, primary, secondary) {
+  if (!confirm(`Remove ${breed} · ${primary} · ${secondary} from catalog?`)) return;
+  await dbOp(async () => {
+    const { error } = await sb.from('frogs').delete().eq('id', id);
+    if (error) throw error;
+    frogs = frogs.filter(f => f.id !== id);
+    renderFrogTable();
+    updateHeader();
+    toast('Frog removed.');
+  });
+}
+
+function renderFrogTable() {
+  const search = document.getElementById('frog-search').value.toLowerCase();
+  const sort = document.getElementById('frog-sort').value;
+  let rows = frogs.filter(f => !search || f.breed.toLowerCase().includes(search) || f.primary_color.toLowerCase().includes(search) || f.secondary_color.toLowerCase().includes(search));
+  rows = rows.map(f => ({
+    ...f,
+    setsCount: uniqueSetsCount(f.breed, f.primary_color, f.secondary_color),
+    setNames: setNamesForFrog(f.breed, f.primary_color, f.secondary_color),
+    bp: uniqueSetsBreedPrimary(f.breed, f.primary_color),
+    bs: uniqueSetsBreedSecondary(f.breed, f.secondary_color)
+  }));
+  if (sort === 'breed') rows.sort((a,b) => a.breed.localeCompare(b.breed) || a.primary_color.localeCompare(b.primary_color));
+  else if (sort === 'sets-desc') rows.sort((a,b) => b.setsCount - a.setsCount || a.breed.localeCompare(b.breed));
+  else if (sort === 'bp-desc') rows.sort((a,b) => b.bp - a.bp || a.breed.localeCompare(b.breed));
+  else if (sort === 'bs-desc') rows.sort((a,b) => b.bs - a.bs || a.breed.localeCompare(b.breed));
+
+  document.getElementById('frog-count').textContent = `${rows.length} frog${rows.length !== 1 ? 's' : ''}`;
+  const tbody = document.getElementById('frog-tbody');
+  if (!rows.length) { tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:22px;">No frogs found</td></tr>`; return; }
+  tbody.innerHTML = rows.map(f => {
+    const names = f.setNames.join(', ') || '—';
+    const scClass = f.setsCount > 1 ? ' gold' : f.setsCount === 0 ? ' zero' : '';
+    return `<tr>
+      <td class="primary-col">${f.breed}</td>
+      <td>${f.primary_color}</td>
+      <td>${f.secondary_color}</td>
+      <td><span class="badge${scClass}">${f.setsCount}</span></td>
+      <td style="font-size:11px;color:var(--text3);max-width:200px;">${names}</td>
+      <td><span class="badge${f.bp > 0 ? ' teal' : ' zero'}">${f.bp}</span></td>
+      <td><span class="badge${f.bs > 0 ? ' amber' : ' zero'}">${f.bs}</span></td>
+      <td><button class="btn-danger" onclick="removeFrog(${f.id},'${esc(f.breed)}','${esc(f.primary_color)}','${esc(f.secondary_color)}')">✕</button></td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Sets ───────────────────────────────────────────────────────────────────
+async function addSet() {
+  const name = document.getElementById('new-set-name').value.trim();
+  const date = document.getElementById('new-set-date').value.trim();
+  if (!name) { toast('Please enter a set name.', true); return; }
+  if (sets.some(s => s.name === name)) { toast('A set with that name already exists.', true); return; }
+  await dbOp(async () => {
+    const { data, error } = await sb.from('sets').insert([{ name, date_label: date }]).select().single();
+    if (error) throw error;
+    sets.push(data);
+    sets.sort((a,b) => a.name.localeCompare(b.name));
+    document.getElementById('new-set-name').value = '';
+    document.getElementById('new-set-date').value = '';
+    renderSetList();
+    selectSet(data.id);
+    updateHeader();
+    toast(`Set "${name}" created.`);
+  });
+}
+
+function renderSetList() {
+  const search = document.getElementById('set-search').value.toLowerCase();
+  const filtered = sets.filter(s => !search || s.name.toLowerCase().includes(search));
+  document.getElementById('set-count-badge').textContent = `${sets.length} set${sets.length !== 1 ? 's' : ''}`;
+  const el = document.getElementById('set-list');
+  if (!filtered.length) { el.innerHTML = `<div class="empty-state">No sets yet.</div>`; return; }
+  el.innerHTML = filtered.map(s => {
+    const count = memberships.filter(m => m.set_id === s.id).length;
+    return `<div class="set-card ${selectedSetId === s.id ? 'selected' : ''}" onclick="selectSet(${s.id})">
+      <div>
+        <div class="set-name">${s.name}</div>
+        <div class="set-meta">${s.date_label || 'No date'} · ${count} member${count !== 1 ? 's' : ''}</div>
+      </div>
+      <span class="badge">${count}</span>
+    </div>`;
+  }).join('');
+}
+
+function selectSet(id) {
+  selectedSetId = id;
+  renderSetList();
+  renderSetDetail();
+}
+
+function renderSetDetail() {
+  const set = sets.find(s => s.id === selectedSetId);
+  const el = document.getElementById('set-detail');
+  if (!set) { el.innerHTML = `<div class="empty-state">← Select a set to view and edit its members</div>`; return; }
+  const mems = memberships.filter(m => m.set_id === set.id);
+  const chips = mems.map(m =>
+    `<span class="member-chip">${m.breed} · ${m.primary_color} · ${m.secondary_color}
+      <button onclick="removeMember(${m.id})" title="Remove">✕</button>
+    </span>`).join('');
+  el.innerHTML = `
+    <h3>${set.name}</h3>
+    <div class="set-date">${set.date_label || 'No date'} · ${mems.length} member${mems.length !== 1 ? 's' : ''}</div>
+    <div class="add-member-row">
+      <div class="form-group"><label>Breed</label><select id="mem-breed"></select></div>
+      <div class="form-group"><label>Primary</label><select id="mem-primary"></select></div>
+      <div class="form-group"><label>Secondary</label><select id="mem-secondary"></select></div>
+      <button class="btn-add" onclick="addMember(${set.id})">+ Add Frog</button>
+    </div>
+    <div style="margin-bottom:16px;">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--text3);margin-bottom:8px;">Members</div>
+      <div>${chips || '<span style="color:var(--text3);font-size:12px;">No members yet.</span>'}</div>
+    </div>
+    <button class="btn-danger" onclick="deleteSet(${set.id},'${esc(set.name)}')">Delete Set</button>`;
+  populateSelect('mem-breed', refs.breeds.slice().sort());
+  populateSelect('mem-primary', refs.primaryColors.slice().sort());
+  populateSelect('mem-secondary', refs.secondaryColors.slice().sort());
+}
+
+async function addMember(setId) {
+  const breed = document.getElementById('mem-breed').value;
+  const primary = document.getElementById('mem-primary').value;
+  const secondary = document.getElementById('mem-secondary').value;
+  await dbOp(async () => {
+    const { data, error } = await sb.from('memberships').insert([{ set_id: setId, breed, primary_color: primary, secondary_color: secondary }]).select().single();
+    if (error) throw error;
+    memberships.push(data);
+    renderSetDetail();
+    renderSetList();
+    renderFrogTable();
+    updateHeader();
+    toast(`Added ${breed} · ${primary} · ${secondary}`);
+  });
+}
+
+async function removeMember(id) {
+  await dbOp(async () => {
+    const { error } = await sb.from('memberships').delete().eq('id', id);
+    if (error) throw error;
+    memberships = memberships.filter(m => m.id !== id);
+    renderSetDetail();
+    renderSetList();
+    renderFrogTable();
+    updateHeader();
+    toast('Member removed.');
+  });
+}
+
+async function deleteSet(id, name) {
+  if (!confirm(`Delete set "${name}" and all its memberships?`)) return;
+  await dbOp(async () => {
+    await sb.from('memberships').delete().eq('set_id', id);
+    const { error } = await sb.from('sets').delete().eq('id', id);
+    if (error) throw error;
+    sets = sets.filter(s => s.id !== id);
+    memberships = memberships.filter(m => m.set_id !== id);
+    selectedSetId = null;
+    renderSetList();
+    renderSetDetail();
+    renderFrogTable();
+    updateHeader();
+    toast(`Set "${name}" deleted.`);
+  });
+}
+
+// ── Analytics ──────────────────────────────────────────────────────────────
+function renderAnalytics() {
+  const setCounts = frogs.map(f => uniqueSetsCount(f.breed, f.primary_color, f.secondary_color));
+  const avg = setCounts.length ? (setCounts.reduce((a,b)=>a+b,0)/setCounts.length).toFixed(2) : 0;
+  const uniqueBreeds = new Set(frogs.map(f=>f.breed)).size;
+  document.getElementById('summary-stats').innerHTML = [
+    ['Total Frogs Owned', frogs.length],
+    ['Total Sets', sets.length],
+    ['Total Memberships', memberships.length],
+    ['Avg Sets per Frog', avg],
+    ['Max Sets (any frog)', setCounts.length ? Math.max(...setCounts) : 0],
+    ['Frogs in 0 Sets', setCounts.filter(c=>c===0).length],
+    ['Frogs in 1 Set', setCounts.filter(c=>c===1).length],
+    ['Frogs in 2+ Sets', setCounts.filter(c=>c>=2).length],
+    ['Unique Breeds Owned', uniqueBreeds],
+  ].map(([l,v])=>`<div class="stat-row"><span class="stat-label">${l}</span><span class="stat-value">${v}</span></div>`).join('');
+
+  const setsBySize = sets.map(s=>({ name:s.name, count: memberships.filter(m=>m.set_id===s.id).length }))
+    .sort((a,b)=>b.count-a.count).slice(0,10);
+  document.getElementById('top-sets').innerHTML = setsBySize.length
+    ? setsBySize.map(s=>`<div class="stat-row"><span class="stat-label">${s.name}</span><span class="stat-value">${s.count}</span></div>`).join('')
+    : '<div style="color:var(--text3);font-size:12px;">No sets yet.</div>';
+
+  renderLookupBP();
+  renderLookupBS();
+}
+
+function renderLookupBP() {
+  const breed = document.getElementById('lookup-bp-breed').value;
+  document.getElementById('lookup-bp-results').innerHTML = refs.primaryColors.slice().sort().map(color => {
+    const count = uniqueSetsBreedPrimary(breed, color);
+    return `<div class="lookup-chip ${count>0?'has-count':''}"><span class="chip-label">${color}</span><span class="chip-count">${count}</span></div>`;
+  }).join('');
+}
+
+function renderLookupBS() {
+  const breed = document.getElementById('lookup-bs-breed').value;
+  document.getElementById('lookup-bs-results').innerHTML = refs.secondaryColors.slice().sort().map(color => {
+    const count = uniqueSetsBreedSecondary(breed, color);
+    return `<div class="lookup-chip ${count>0?'has-count':''}"><span class="chip-label">${color}</span><span class="chip-count">${count}</span></div>`;
+  }).join('');
+}
+
+// ── Reference lists ────────────────────────────────────────────────────────
+let refSaveTimer = null;
+function saveRefs() {
+  refs.breeds = document.getElementById('ref-breeds').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  refs.primaryColors = document.getElementById('ref-primary').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  refs.secondaryColors = document.getElementById('ref-secondary').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  document.getElementById('breed-count').textContent = refs.breeds.length;
+  document.getElementById('pri-count').textContent = refs.primaryColors.length;
+  document.getElementById('sec-count').textContent = refs.secondaryColors.length;
+  populateAllDropdowns();
+  clearTimeout(refSaveTimer);
+  refSaveTimer = setTimeout(async () => {
+    await dbOp(async () => {
+      const { error } = await sb.from('refs').upsert([{ id: 1, breeds: refs.breeds, primary_colors: refs.primaryColors, secondary_colors: refs.secondaryColors }]);
+      if (error) throw error;
+    });
+  }, 1000);
+}
+
+// ── Dropdowns ──────────────────────────────────────────────────────────────
+function populateSelect(id, items) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const prev = el.value;
+  el.innerHTML = items.map(v=>`<option value="${esc(v)}">${v}</option>`).join('');
+  if (prev && items.includes(prev)) el.value = prev;
+}
+
+function populateAllDropdowns() {
+  const b = refs.breeds.slice().sort();
+  const p = refs.primaryColors.slice().sort();
+  const s = refs.secondaryColors.slice().sort();
+  populateSelect('add-breed', b); populateSelect('add-primary', p); populateSelect('add-secondary', s);
+  populateSelect('lookup-bp-breed', b); populateSelect('lookup-bs-breed', b);
+  document.getElementById('ref-breeds').value = refs.breeds.join('\n');
+  document.getElementById('ref-primary').value = refs.primaryColors.join('\n');
+  document.getElementById('ref-secondary').value = refs.secondaryColors.join('\n');
+  document.getElementById('breed-count').textContent = refs.breeds.length;
+  document.getElementById('pri-count').textContent = refs.primaryColors.length;
+  document.getElementById('sec-count').textContent = refs.secondaryColors.length;
+}
+
+// ── Export ─────────────────────────────────────────────────────────────────
+function exportCSV() {
+  const rows = [['Breed','Primary Color','Secondary Color','Sets Count','Set Names','Sets w/ Breed+Primary','Sets w/ Breed+Secondary']];
+  frogs.forEach(f => rows.push([f.breed, f.primary_color, f.secondary_color,
+    uniqueSetsCount(f.breed, f.primary_color, f.secondary_color),
+    setNamesForFrog(f.breed, f.primary_color, f.secondary_color).join('; '),
+    uniqueSetsBreedPrimary(f.breed, f.primary_color),
+    uniqueSetsBreedSecondary(f.breed, f.secondary_color)
+  ]));
+  downloadCSV(rows, 'frog_catalog.csv');
+}
+function exportMembershipsCSV() {
+  const rows = [['Set Name','Date','Breed','Primary Color','Secondary Color']];
+  memberships.forEach(m => {
+    const s = sets.find(s=>s.id===m.set_id);
+    rows.push([s?.name||'', s?.date_label||'', m.breed, m.primary_color, m.secondary_color]);
+  });
+  downloadCSV(rows, 'frog_memberships.csv');
+}
+function exportJSON() {
+  const data = { frogs, sets, memberships, refs, exported: new Date().toISOString() };
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `frog_tracker_backup_${new Date().toISOString().slice(0,10)}.json`;
+  a.click(); toast('JSON backup exported.');
+}
+function downloadCSV(rows, filename) {
+  const csv = rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv],{type:'text/csv'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = filename; a.click();
+}
+
+async function clearAllData() {
+  if (!confirm('Delete ALL frogs, sets, and memberships from the cloud database? This cannot be undone.')) return;
+  await dbOp(async () => {
+    await sb.from('memberships').delete().neq('id', 0);
+    await sb.from('frogs').delete().neq('id', 0);
+    await sb.from('sets').delete().neq('id', 0);
+    frogs=[]; sets=[]; memberships=[];
+    renderFrogTable(); renderSetList(); updateHeader();
+    selectedSetId = null;
+    document.getElementById('set-detail').innerHTML = `<div class="empty-state">← Select a set to view and edit its members</div>`;
+    toast('All data cleared.');
+  });
+}
+
+// ── Nav ────────────────────────────────────────────────────────────────────
+function showView(name, btn) {
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b=>b.classList.remove('active'));
+  document.getElementById('view-'+name).classList.add('active');
+  if (btn) btn.classList.add('active');
+  if (name === 'analytics') renderAnalytics();
+}
+
+function updateHeader() {
+  document.getElementById('hdr-frogs').textContent = frogs.length;
+  document.getElementById('hdr-sets').textContent = sets.length;
+  document.getElementById('hdr-memberships').textContent = memberships.length;
+}
+
+// ── Util ───────────────────────────────────────────────────────────────────
+function esc(s) { return String(s).replace(/'/g,"\\'").replace(/"/g,'&quot;'); }
+
+function toast(msg, isError=false) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast' + (isError ? ' error' : '');
+  el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'), 2500);
+}
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
